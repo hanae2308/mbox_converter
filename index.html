@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MBOX to EML Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        textarea, input, button {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        #progress {
+            margin: 10px 0;
+            display: none;
+        }
+        #downloadAll {
+            display: none;
+            background: #2196F3;
+        }
+        #downloadAll:hover {
+            background: #0b7dda;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MBOX to EML Converter</h1>
+        <p>Upload an MBOX file or paste its contents below to convert to individual EML files.</p>
+        
+        <input type="file" id="fileInput" accept=".mbox">
+        <p>or</p>
+        <textarea id="mboxContent" rows="10" placeholder="Paste MBOX content here..."></textarea>
+        
+        <button id="convertBtn">Convert to EML</button>
+        
+        <div id="progress">Processing... <span id="progressCount">0</span> messages converted</div>
+        
+        <div id="results"></div>
+        
+        <button id="downloadAll" style="display: none;">Download All as ZIP</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script>
+        document.getElementById('convertBtn').addEventListener('click', convertMboxToEml);
+        document.getElementById('downloadAll').addEventListener('click', downloadAllAsZip);
+        
+        function convertMboxToEml() {
+            const fileInput = document.getElementById('fileInput');
+            const mboxContent = document.getElementById('mboxContent').value;
+            const progress = document.getElementById('progress');
+            const progressCount = document.getElementById('progressCount');
+            const resultsDiv = document.getElementById('results');
+            const downloadAllBtn = document.getElementById('downloadAll');
+            
+            resultsDiv.innerHTML = '';
+            downloadAllBtn.style.display = 'none';
+            
+            let contentPromise;
+            
+            if (fileInput.files.length > 0) {
+                contentPromise = fileInput.files[0].text();
+            } else if (mboxContent.trim() !== '') {
+                contentPromise = Promise.resolve(mboxContent);
+            } else {
+                alert('Please either upload an MBOX file or paste its content.');
+                return;
+            }
+            
+            progress.style.display = 'block';
+            
+            contentPromise.then(content => {
+                const messages = parseMbox(content);
+                progressCount.textContent = messages.length;
+                
+                if (messages.length === 0) {
+                    resultsDiv.innerHTML = '<p>No messages found in the MBOX file.</p>';
+                    progress.style.display = 'none';
+                    return;
+                }
+                
+                const zip = new JSZip();
+                let count = 0;
+                
+                messages.forEach((message, index) => {
+                    const emlContent = message.raw;
+                    const filename = `message_${index + 1}.eml`;
+                    
+                    // Create download link for individual message
+                    const blob = new Blob([emlContent], { type: 'message/rfc822' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    link.textContent = `Download ${filename}`;
+                    link.style.display = 'block';
+                    link.style.margin = '5px 0';
+                    
+                    resultsDiv.appendChild(link);
+                    resultsDiv.appendChild(document.createElement('br'));
+                    
+                    // Add to ZIP
+                    zip.file(filename, emlContent);
+                    
+                    count++;
+                    progressCount.textContent = count;
+                });
+                
+                progress.style.display = 'none';
+                
+                if (messages.length > 1) {
+                    // Store ZIP in global variable for download
+                    window.mboxZip = zip;
+                    downloadAllBtn.style.display = 'block';
+                }
+            }).catch(error => {
+                console.error('Error:', error);
+                resultsDiv.innerHTML = `<p style="color: red;">Error processing MBOX file: ${error.message}</p>`;
+                progress.style.display = 'none';
+            });
+        }
+        
+        function parseMbox(content) {
+            // This is a simple MBOX parser that works for many common cases
+            // Note: MBOX parsing can be complex due to various formats
+            
+            const messages = [];
+            const lines = content.split(/\r?\n/);
+            let currentMessage = [];
+            let inMessage = false;
+            
+            for (const line of lines) {
+                if (line.startsWith('From ') && currentMessage.length > 0) {
+                    // New message starting, save the previous one
+                    messages.push({ raw: currentMessage.join('\n') });
+                    currentMessage = [line];
+                    inMessage = true;
+                } else if (line.startsWith('From ') && !inMessage) {
+                    // First message starting
+                    currentMessage = [line];
+                    inMessage = true;
+                } else if (inMessage) {
+                    currentMessage.push(line);
+                }
+            }
+            
+            // Add the last message
+            if (currentMessage.length > 0) {
+                messages.push({ raw: currentMessage.join('\n') });
+            }
+            
+            return messages;
+        }
+        
+        function downloadAllAsZip() {
+            if (!window.mboxZip) return;
+            
+            window.mboxZip.generateAsync({ type: 'blob' }).then(content => {
+                const url = URL.createObjectURL(content);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'messages.zip';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            });
+        }
+    </script>
+</body>
+</html>
